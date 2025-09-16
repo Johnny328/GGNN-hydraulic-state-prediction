@@ -19,7 +19,7 @@ np.random.seed(21)
 
 def data_gen(duration,report_time,dataset):
     np.random.seed(21)
-    n_frame=int(duration*60/report_time+1)   #历史数据+预测步长数据        
+    n_frame=int(duration*60/report_time+1)   #historical data + prediction step data        
     n_slot=dataset.shape[0]-n_frame+1
     tmp_seq=np.zeros((n_slot,n_frame,dataset.shape[1]))
     for i in range(n_slot):
@@ -33,63 +33,65 @@ def data_gen(duration,report_time,dataset):
 
 def enhance_sensor_impact_np(adj_matrix, sensor_mask, enhancement_factor=10):
     """
-    使用 NumPy 实现邻接矩阵的传感器节点增强。
+    Implement sensor node enhancement of adjacency matrix using NumPy.
 
     Args:
-    adj_matrix (numpy.ndarray): 邻接矩阵，大小为 [num_nodes, num_nodes]
-    sensor_indices (list or numpy.ndarray): 传感器节点索引列表
-    enhancement_factor (float): 增强因子
+    adj_matrix (numpy.ndarray): Adjacency matrix, size [num_nodes, num_nodes]
+    sensor_indices (list or numpy.ndarray): List of sensor node indices
+    enhancement_factor (float): Enhancement factor
 
     Returns:
-    numpy.ndarray: 增强后的邻接矩阵
+    numpy.ndarray: Enhanced adjacency matrix
     """
-    # 创建一个与邻接矩阵同形状的mask，初始化为1
+    # Create a mask with the same shape as the adjacency matrix, initialized to 1
     sensor_indices = np.where(sensor_mask == 1)[0]
     mask = np.ones_like(adj_matrix)
 
-    # 设置传感器节点的行和列的mask值
+    # Set mask values for rows and columns of sensor nodes
     mask[sensor_indices, :] *= enhancement_factor
     mask[:, sensor_indices] *= enhancement_factor
-    # 应用mask到原邻接矩阵
+    # Apply mask to the original adjacency matrix
     enhanced_adj_matrix = adj_matrix * mask
     return enhanced_adj_matrix
 
 def add_self_connections_to_sensors(adj_matrix, sensor_mask, self_weight=1.0):
     """
-    在邻接矩阵中为传感器节点添加自连接权重。
+    Add self-connection weights to sensor nodes in the adjacency matrix.
     
-    参数:
-    adj_matrix (np.array): 原始的加权邻接矩阵。
-    sensor_mask (np.array): 一个一维数组，其中0表示没有传感器，1表示有传感器。
-    self_weight (float): 要添加到自连接的权重。
+    Parameters:
+    adj_matrix (np.array): Original weighted adjacency matrix.
+    sensor_mask (np.array): A one-dimensional array where 0 indicates no sensor, 1 indicates a sensor.
+    self_weight (float): Weight to be added to self-connections.
 
-    返回:
-    np.array: 修改后的邻接矩阵。
+    Returns:
+    np.array: Modified adjacency matrix.
     """
-    # 找到传感器位置的索引
+    # Find indices of sensor positions
     sensor_indices = np.where(sensor_mask == 1)[0]
-    # 在对角线位置为传感器节点增加权重
+    # Add weight to diagonal positions for sensor nodes
     adj_matrix[sensor_indices, sensor_indices] += self_weight
     return adj_matrix
 
 def create_graph_from_adjacency_matrix(adj_matrix):
-    """从邻接矩阵创建有向图，并添加边和权重"""
+    """Create a directed graph from an adjacency matrix, and add edges and weights"""
     num_nodes = adj_matrix.shape[0]
     print(num_nodes)
     G = nx.DiGraph()
     for i in range(num_nodes):
         for j in range(num_nodes):
-            if adj_matrix[i, j] != 0 :  # 假设0表示没有直接连接
+            if adj_matrix[i, j] != 0 :  # Assume 0 means no direct connection
                 G.add_edge(i, j, weight=adj_matrix[i, j])
     return G
+    
 def compute_shortest_paths(G, sensor_indices):
-    """这是用来计算有向图中传感器节点到各个节点的最短距离的"""
+    """This is used to calculate the shortest distances from sensor nodes to each node in a directed graph"""
     shortest_paths = {}
     for sensor_idx in sensor_indices:
-        # 计算从每个传感器节点出发到所有其他节点的最短路径和长度
+        # Calculate shortest paths and lengths from each sensor node to all other nodes
         dist = nx.single_source_dijkstra_path_length(G, source=sensor_idx, weight='weight')
         shortest_paths[sensor_idx] = dist
     return shortest_paths
+
 def compute_weight_matrix(shortest_paths, sensor_indices, non_sensor_indices):
     num_sensors = len(sensor_indices)
     num_non_sensors = len(non_sensor_indices)
@@ -101,30 +103,30 @@ def compute_weight_matrix(shortest_paths, sensor_indices, non_sensor_indices):
             rev_dist = shortest_paths['rev'][sensor_idx].get(non_sensor_idx, float('inf'))
             min_distances[i, j] = min(fwd_dist, rev_dist)
     
-    weights = 1 / (min_distances + 1)  # 防止除零错误
+    weights = 1 / (min_distances + 1)  # prevent division-by-zero errors
     weights[min_distances == float('inf')] = 0
     weight_sums = weights.sum(axis=0, keepdim=True)  # Sum across sensor nodes for each non-sensor node
     normalized_weights = weights / weight_sums  # Normalize weights
-    # 检查weights是否包含nan值
+    # Check whether weights contain nan values
     if torch.isnan(normalized_weights).any():
         print("Warning: weights contains nan values.")
         normalized_weights = torch.nan_to_num(normalized_weights, nan=0.0) 
     
-    return normalized_weights.transpose(0, 1)  # 转置以使维度正确
+    return normalized_weights.transpose(0, 1)  # transpose so dimensions are correct
 
 def initialize_features_with_min_paths(attr_matrix, shortest_paths_fwd, shortest_paths_rev, sensor_indices, non_sensor_indices):
-    # 检查attr_matrix的维度并扩展最后一个维度
+    # Check attr_matrix dimensions and expand the last dimension if needed
     if attr_matrix.dim() == 2:
         attr_matrix = attr_matrix.unsqueeze(-1)     
     weights = compute_weight_matrix({'fwd': shortest_paths_fwd, 'rev': shortest_paths_rev}, sensor_indices, non_sensor_indices)
     weights_expanded = weights.unsqueeze(0).expand(attr_matrix.size(0), -1, -1)
     
-    # 获取传感器特征
-    sensor_features = attr_matrix[:, sensor_indices, :]  # 维度 [batch_size, num_sensors, feature_size]
+    # Get sensor features
+    sensor_features = attr_matrix[:, sensor_indices, :]  # shape [batch_size, num_sensors, feature_size]
     
-    # 计算加权特征
+    # Compute weighted features
     weighted_features = torch.bmm(weights_expanded, sensor_features)  # [batch_size, num_non_sensors, feature_size]    
-    # 更新非传感器节点的特征
+    # Update features for non-sensor nodes
     attr_matrix[:, non_sensor_indices, :] = weighted_features
     if torch.isnan(attr_matrix).any():
         print("Warning: weights contains nan values.")
@@ -134,7 +136,7 @@ def initialize_features_with_min_paths(attr_matrix, shortest_paths_fwd, shortest
 
 
 def train_model(model, batch_size,feature_size,output_size, epochs,steps_per_epoch,TrainDataset, TestDataset,adj_matrices, dist_matrices,mask_0,mask_1,mask_2,mask_area=None,yanmo=True,percent=0.2,loss_type=0,standard_type=0,threshold=0.0001,init=False,w=1):
-    #w是超参数，用来平衡物理损失和预测精度的权重，默认是1
+    #w is a hyperparameter used to balance the weight between physical loss and prediction accuracy, default is 1
     
        
     NODE_NUM=adj_matrices.shape[0]
@@ -146,42 +148,42 @@ def train_model(model, batch_size,feature_size,output_size, epochs,steps_per_epo
     VAL_BATCH_SIZE = min(len(TestDataset),batch_size)
 
     
-    #这个mask作为输入的mask(非传感器节点的序号)
+    #This mask serves as the input mask (indices of non-sensor nodes)
     mask_measure1=np.argwhere(mask_0==0)[:,0]
 
     mask_sample=mask_1 
     
-    # 对每个区域的节点属性进行标准化，并保存为一个矩阵
-    # 创建MinMaxScaler对象
+    # Standardize node attributes for each region and save as a matrix
+    # Create MinMaxScaler object
     region_params = {}
     TrainDataset= torch.tensor(TrainDataset, dtype=torch.float32)
     TestDataset= torch.tensor(TestDataset, dtype=torch.float32)
     
-    #在这主要是为了给传感器添加一个自连接节点
+    #This is mainly to add a self-connection node for sensors
     self_attention=False
     if self_attention==True:
-        # 调用函数添加自连接
+        # Call function to add self-connections
         adj_matrices = add_self_connections_to_sensors(adj_matrices, mask_0, self_weight=1.0)
     
     if standard_type==0:
         pass
     elif standard_type == 1:        
-        # 计算所有区域的均值和标准差
+        # Calculate mean and standard deviation for all regions
         mean_value = torch.mean(TrainDataset)
         std_value = torch.std(TrainDataset)
 
-        # 对训练集和测试集进行z-score标准化
+        # Apply z-score normalization to training and test sets
         TrainDataset = (TrainDataset - mean_value) / std_value
         TestDataset = (TestDataset - mean_value) / std_value
-        # 保存均值和标准差
+        # Save mean and standard deviation
         region_params = {'mean': mean_value, 'std': std_value}
     elif standard_type == 2:
-        # 分不同区域进行最大最小标准化
-        for region in range(1, 5):  # 区域编号从1到4
-            region_indices = torch.nonzero(mask_area == region).squeeze()  # 获取属于当前区域的节点索引            
+        # Perform max-min normalization for different regions
+        for region in range(1, 5):  # Region numbers from 1 to 4
+            region_indices = torch.nonzero(mask_area == region).squeeze()  # Get indices of nodes belonging to current region            
             mean_value = torch.mean(TrainDataset[:, :, region_indices])
             std_value = torch.std(TrainDataset[:, :, region_indices])            
-            # 对训练集和测试集进行z-score标准化
+            # Apply z-score normalization to training and test sets
             TrainDataset[:, :, region_indices] = (TrainDataset[:, :, region_indices] - mean_value) / std_value
             TestDataset[:, :, region_indices] = (TestDataset[:, :, region_indices] - mean_value) / std_value
 
@@ -192,9 +194,9 @@ def train_model(model, batch_size,feature_size,output_size, epochs,steps_per_epo
     val_data = DataLoader(TestDataset, batch_size=VAL_BATCH_SIZE, shuffle=False) 
         
     #criterion = nn.NLLLoss()
-    # #做回归的时候用的是MSE的损失函数
+    # When using regression, MSE (Mean Squared Error) loss is often used
     # criterion = nn.MSELoss()
-    #做回归的时候用的是MAE的损失函数
+    # When using regression, MAE (Mean Absolute Error / L1) loss can be used
     # criterion = nn.L1Loss()  
 
     optimizer = torch.optim.Adam(model.parameters())        
@@ -210,16 +212,16 @@ def train_model(model, batch_size,feature_size,output_size, epochs,steps_per_epo
     
     G = create_graph_from_adjacency_matrix(dist_matrices)
     sensor_indices=np.argwhere(mask_0==1)[:,0]        
-    # 计算正向最短路径
+    # Compute forward shortest paths
     shortest_paths_fwd = compute_shortest_paths(G, sensor_indices)
 
-    # 计算反向最短路径
+    # Compute reverse shortest paths
     G_rev = G.reverse()
     shortest_paths_rev = compute_shortest_paths(G_rev, sensor_indices)
     a = adj_matrices
     # d = dist_matrices
-    A_base = torch.from_numpy(a).float().cuda()  # 基础 A 矩阵
-    # D_base = torch.from_numpy(d).float().cuda()  # 基础 D 矩阵
+    A_base = torch.from_numpy(a).float().cuda()  
+    # D_base = torch.from_numpy(d).float().cuda()  
 
     # Training 
     # =========================================================================
@@ -241,12 +243,12 @@ def train_model(model, batch_size,feature_size,output_size, epochs,steps_per_epo
                
                 
                 if yanmo and percent>0:
-                    #这里需要复制mask_0,因为后面的test得用所有的数据来进行输入，如果这改写了会影响后面的test结果
-                    #如果掩膜为真，那么就在训练的时候随机选择20%的传感器的数字设置为0，然后进行训练
+                    #Need to copy mask_0 here, as later tests need to use all data for input, modifying it would affect subsequent test results
+                    #If masking is true, then randomly select 20% of the sensors' values to set to 0 during training
                     mask_00=mask_0.copy()
                     
                     #indices=np.where(mask_00 == 1)[0]
-                    #现在更新一下掩膜的站点：用mask_sample（只是说在mask_sample里面传感器的节点里面选掩膜的节点，但是还是应该在mask_0里面进行掩膜）
+                    #Now updating the mask sites: selecting masked nodes from sensor nodes in mask_sample, but still applying the mask in mask_0
                     indices=np.where(mask_sample == 1)[0]
                     num_to_select = int(len(indices)*percent)
                     if num_to_select:
@@ -268,7 +270,7 @@ def train_model(model, batch_size,feature_size,output_size, epochs,steps_per_epo
                 T=train_input[:,:,-output_size:]   
                     
                 # else:
-                #     #需要注意到如果进行掩膜操作的话每一次的掩膜都会变，所以后面的部分测试集掩膜要保证跟刚开始一样
+                #     #Need to note that if masking operation is performed, the mask will change each time, so the test set mask later needs to be ensured to be the same as at the beginning
                 #     mask_measure_1= np.argwhere(mask_0==0)[:,0]  
                 #     X[:,mask_measure_1,:]=0
 
@@ -276,27 +278,27 @@ def train_model(model, batch_size,feature_size,output_size, epochs,steps_per_epo
                 
  
                                          
-                # 调整 A 和 D 的形状以匹配批次大小
-                A = A_base.expand(X.shape[0], -1, -1)  # 使用 expand 节省内存
+                # Adjust the shapes of A and D to match the batch size
+                A = A_base.expand(X.shape[0], -1, -1)  # Use expand to save memory
                 Y = model(X.cuda(),A)
                 
                 if standard_type==0:
                     pass
                 elif standard_type == 1:
-                    # # 所有区域统一进行最大最小标准化
+                    # # Unified max-min normalization for all regions
                     # Y = Y * (region_params['max']-region_params['min']) + min_value
                     # T = T * (region_params['max']-region_params['min']) + min_value
                     
-                    # 所有区域统一进行z-score标准化
+                    # Unified z-score normalization for all regions
                     mean_value = region_params['mean']
                     std_value = region_params['std']
                     Y = Y*std_value + mean_value
                     T = T*std_value + mean_value
 
                 elif standard_type == 2:
-                    # 分不同区域进行最大最小标准化
-                    for region in range(1, 5):  # 区域编号从1到4
-                        region_indices = torch.nonzero(mask_area == region).squeeze()  # 获取属于当前区域的节点索引
+                    # Max-min normalization by different regions
+                    for region in range(1, 5):  # Region numbers from 1 to 4
+                        region_indices = torch.nonzero(mask_area == region).squeeze()  # Get indices of nodes belonging to current region
                         # min_value = region_params[region]['min']
                         # max_value = region_params[region]['max']
                         # Y[:, region_indices] = Y[:, region_indices] * (max_value - min_value) + min_value
@@ -304,7 +306,7 @@ def train_model(model, batch_size,feature_size,output_size, epochs,steps_per_epo
                         mean_value = region_params[region]['mean']
                         std_value = region_params[region]['std']
                         Y[:, region_indices] = Y[:, region_indices]*std_value + mean_value
-                        T[:, region_indices] = T[:, region_indices]*std_value + mean_value                     
+                        T[:, region_indices] = T[:, region_indices]*std_value + mean_value
                 
                 loss = metrics429.custom_loss_extend_physic(Y, T,A, mask_0, mask_2,loss_type,threshold,w)
                 # Zero gradients, perform a backward pass, and update the weights.
@@ -335,7 +337,7 @@ def train_model(model, batch_size,feature_size,output_size, epochs,steps_per_epo
             
             X[:,mask_measure1,:]=0
             
-            #添加初始的特征属性
+            # Add initial feature attributes
             if percent==0 and init:
                 sensor_indices=np.argwhere(mask_0==1)[:,0]
                 non_sensor_indices=np.argwhere(mask_0==0)[:,0]                
@@ -343,24 +345,24 @@ def train_model(model, batch_size,feature_size,output_size, epochs,steps_per_epo
             
             T=batch[:,:,-output_size:]
                            
-            # 调整 A 和 D 的形状以匹配批次大小
-            A = A_base.expand(X.shape[0], -1, -1)  # 使用 expand 节省内存
+            # Adjust the shapes of A and D to match the batch size
+            A = A_base.expand(X.shape[0], -1, -1)  # Use expand to save memory
             Y = model(X.cuda(),A) 
             
             if standard_type==0:
                 pass
             elif standard_type == 1:
                 
-                # 所有区域统一进行z-score标准化
+                # Apply z-score normalization uniformly across all regions
                 mean_value = region_params['mean']
                 std_value = region_params['std']
                 Y = Y*std_value + mean_value
                 T = T*std_value + mean_value
 
             elif standard_type == 2:
-                # 分不同区域进行最大最小标准化
-                for region in range(1, 5):  # 区域编号从1到4
-                    region_indices = torch.nonzero(mask_area == region).squeeze()  # 获取属于当前区域的节点索引                    
+                # Apply region-wise normalization (z-score using stored region params)
+                for region in range(1, 5):  # Region numbers from 1 to 4
+                    region_indices = torch.nonzero(mask_area == region).squeeze()  # Get indices of nodes belonging to current region                    
                     mean_value = region_params[region]['mean']
                     std_value = region_params[region]['std']
                     Y[:, region_indices] = Y[:, region_indices]*std_value + mean_value
@@ -370,7 +372,7 @@ def train_model(model, batch_size,feature_size,output_size, epochs,steps_per_epo
             T__=T.detach().cpu().numpy()
                         
             nonzero_cols1 = np.argwhere(mask_2==1)[:,0]
-            #选择不全为0的列构成新的张量,而且只取最后一个值进行比较
+            #Select columns that are not all zeros to form new tensors, and only compare the last value
             Y_=Y__[:,nonzero_cols1,-1]
             T_=T__[:,nonzero_cols1,-1]
             
