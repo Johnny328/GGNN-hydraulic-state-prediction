@@ -26,63 +26,62 @@ def MSPE(pred, true):
     return np.mean(np.square((pred - true) / (true+1e-5)))
 
 # def restrict(Y, pred_bounds):
-#     # 确保 pred_bounds 转换为与 Y 相同的数据类型
+#     # Ensure pred_bounds is converted to the same data type as Y
 #     pred_bounds = torch.tensor(pred_bounds, dtype=Y.dtype).cuda()
     
-#     # 获取下界和上界
+#     # Get lower and upper bounds
 #     lower_bounds, upper_bounds = pred_bounds[:, 0], pred_bounds[:, 1]
     
-#     # 扩展下界和上界以匹配 Y 的批次大小
+#     # Expand lower and upper bounds to match Y's batch size
 #     lower_bounds = lower_bounds.unsqueeze(0).expand_as(Y)
 #     upper_bounds = upper_bounds.unsqueeze(0).expand_as(Y)
     
-#     # 将 Y 中超出界限的值约束为上界或下界
+#     # Clip Y to the bounds
 #     Y_clipped = torch.min(torch.max(Y, lower_bounds), upper_bounds)
     
 #     return Y_clipped
 
 def restrict(Y, pred_bounds,mask_measure):
-    # 将 Y 和 pred_bounds 转换为 PyTorch 张量并移动到 GPU
+    # Convert Y and pred_bounds to PyTorch tensors and move to GPU
     Y=Y.cuda()
-    # 确保 pred_bounds 转换为与 Y 相同的数据类型
+    # Ensure pred_bounds is converted to the same data type as Y
     pred_bounds = torch.tensor(pred_bounds, dtype=Y.dtype).cuda()
     mask_measure = torch.tensor(mask_measure, dtype=torch.bool).cuda()    
-    # 获取下界和上界
+    # Get lower and upper bounds
     lower_bounds, upper_bounds = pred_bounds[:, 0], pred_bounds[:, 1]
     
-    # 扩展下界和上界以匹配 Y 的批次大小
+    # Expand lower and upper bounds to match Y's batch size
     lower_bounds = lower_bounds.unsqueeze(0).expand_as(Y)
     upper_bounds = upper_bounds.unsqueeze(0).expand_as(Y)   
      
-    # 使用 mask_measure 来保护传感器站点的原始预测值
-    # 只对非传感器站点的节点应用约束
-    mask_no_measure = ~mask_measure  # 获取非传感器站点的掩膜
+    # Use mask_measure to protect original predicted values of sensor sites
+    # Only apply constraints to non-sensor site nodes
+    mask_no_measure = ~mask_measure  # Get mask for non-sensor sites
     mask_no_measure = mask_no_measure.unsqueeze(0).expand_as(Y)
         
-    # 创建一个复制 Y 的张量来进行条件修改
+    # Create a copy of Y tensor for conditional modification
     Y_clipped = Y.clone()
 
-    # 将 Y 中超出界限的非传感器站点值约束为上界或下界
+    # Constrain non-sensor site values in Y that exceed bounds to upper or lower bounds
     Y_clipped[mask_no_measure] = torch.min(torch.max(Y[mask_no_measure], lower_bounds[mask_no_measure]), upper_bounds[mask_no_measure])
 
     return Y_clipped
     
 
-#计算常规的损失（考虑检测站点的损失以及非监测站点的损失
+# Calculate the conventional loss (considering the loss of detection sites and non-monitored sites)
 def custom_loss(Y, T, pred_bounds, mask_measure,mask_prediction):
     
     Y=Y.cuda()
     T=T.cuda()
-    pred_bounds = torch.tensor(pred_bounds, dtype=torch.float32).cuda()  # 确保类型匹配
-    mask_measure = torch.tensor(mask_measure, dtype=torch.bool).cuda()  # 使用bool类型更合适
-    mask_prediction = torch.tensor(mask_prediction, dtype=torch.bool).cuda()  # 使用bool类型更合适
+    pred_bounds = torch.tensor(pred_bounds, dtype=torch.float32).cuda()  # Ensure type matching
+    mask_measure = torch.tensor(mask_measure, dtype=torch.bool).cuda()  # Using bool type is more appropriate
+    mask_prediction = torch.tensor(mask_prediction, dtype=torch.bool).cuda()  # Using bool type is more appropriate
 
-    # 获取有监测数据的节点索引
+    # Get indices of nodes with monitored data
     mask_measure_idx = torch.nonzero(mask_measure, as_tuple=True)[0]
 
-    # 获取无监测数据的节点索引
-    #mask_no_measure_idx = torch.nonzero(~mask_measure, as_tuple=True)[0]
-    #我们在比较的时候不用比较没有节点需水量的点，这些点忽略不计(又要是有需水量的，又要是非传感器的)
+    # Get indices of nodes without monitored data
+    # When comparing, we don't compare points without node water demand, these points are ignored (must have water demand and be non-sensors)
     mask_intersection = torch.logical_and(~mask_measure, mask_prediction)
     mask_no_measure_idx=torch.nonzero(mask_intersection, as_tuple=True)[0]
     
@@ -90,27 +89,27 @@ def custom_loss(Y, T, pred_bounds, mask_measure,mask_prediction):
     #mask_prediction_idx = torch.nonzero(mask_prediction, as_tuple=True)[0]
 
 
-    # 计算基本损失（MAE） - 只考虑有监测数据的节点(有数据的部分取平均)
+    # Calculate basic loss (MAE) - only consider nodes with monitored data (average the parts with data)
     #mae_loss=MAE(Y[:, mask_measure_idx],T[:, mask_measure_idx])
     mae_loss = torch.mean(torch.abs(Y[:, mask_measure_idx] - T[:, mask_measure_idx]))
     # criterion = nn.L1Loss()
     # mae_loss = criterion(Y[:, mask_measure_idx] , T[:, mask_measure_idx])
 
-    # 计算额外损失 - 只考虑无监测数据的节点
+    # Calculate additional loss - only consider nodes without monitored data
     extra_loss = 0
     if len(mask_no_measure_idx) > 0:
         pred_no_measure = Y[:, mask_no_measure_idx]
         lower_bounds = pred_bounds[mask_no_measure_idx, 0].unsqueeze(0)
         upper_bounds = pred_bounds[mask_no_measure_idx, 1].unsqueeze(0)
 
-        # 计算超出上下界的损失
+        # Calculate losses exceeding upper and lower bounds
         lower_losses = torch.clamp(lower_bounds - pred_no_measure, min=0)
         upper_losses = torch.clamp(pred_no_measure - upper_bounds, min=0)
 
-        # 将超出上下界的损失相加
+        # Add the losses exceeding upper and lower bounds
         #extra_loss = torch.mean(lower_losses + upper_losses)
         
-    # 计算总损失
+    # Calculate total loss
     total_loss = mae_loss + 0.1*extra_loss
     #total_loss = mae_loss 
     return total_loss
@@ -118,42 +117,42 @@ def custom_loss(Y, T, pred_bounds, mask_measure,mask_prediction):
 import torch
 
 def calculate_physical_constraints_loss(Y, adj_matrix, threshold=0.0001):
-    # 将邻接矩阵转换为0-1矩阵，大于0的设为1
+    # Convert adjacency matrix to 0-1 matrix, set values greater than 0 to 1
     binary_adj_matrix = (adj_matrix > 0).float()
 
-    if Y.dim() == 2:  # 处理二维情况
-        # 扩展Y以便进行逐元素操作
+    if Y.dim() == 2:  # Handle 2D case
+        # Expand Y for element-wise operations
         Y_expanded = Y.unsqueeze(-1).expand(-1, -1, Y.size(1))
 
-        # 计算节点间的水头差，上游节点的水头需要大于下游节点
+        # Calculate head difference between nodes, upstream node head should be greater than downstream
         head_diff = Y_expanded - Y_expanded.transpose(1, 2)
 
-        # 应用邻接矩阵过滤，只考虑实际连接的节点间差异
+        # Apply adjacency matrix filter, only consider differences between actually connected nodes
         constrained_head_diff = head_diff * binary_adj_matrix
 
-        # 只对违反物理约束（下游水头+阈值大于上游水头）的情况计算损失
+        # Only calculate loss for cases violating physical constraints (downstream head + threshold > upstream head)
         violations = torch.relu(-(constrained_head_diff - threshold))
 
-        # 计算损失，求和并平均
+        # Calculate loss, sum and average
         total_violations = torch.sum(violations)
         num_connections = torch.sum(binary_adj_matrix)
         mean_violation = total_violations / num_connections if num_connections > 0 else torch.tensor(0.0).to(Y.device)
-    elif Y.dim() == 3:  # 处理三维情况
-        # 扩展Y以便进行逐元素操作
+    elif Y.dim() == 3:  # Handle 3D case
+        # Expand Y for element-wise operations
         Y_expanded = Y.unsqueeze(2).expand(-1, -1, Y.size(1), -1)
 
-        # 计算节点间的水头差（针对每个时间步）
+        # Calculate head difference between nodes (for each time step)
         head_diff = Y_expanded - Y_expanded.transpose(1, 2)
 
-        # 应用邻接矩阵过滤，只考虑实际连接的节点间差异
+        # Apply adjacency matrix filter, only consider differences between actually connected nodes
         constrained_head_diff = head_diff * binary_adj_matrix.unsqueeze(-1)
 
-        # 只对违反物理约束（下游水头+阈值大于上游水头）的情况计算损失
+        # Only calculate loss for cases violating physical constraints (downstream head + threshold > upstream head)
         violations = torch.relu(-(constrained_head_diff - threshold))
 
-        # 计算损失，沿节点和时间步求和并平均
+        # Calculate loss, sum and average along nodes and time steps
         total_violations = torch.sum(violations)
-        num_connections = torch.sum(binary_adj_matrix) * Y.size(-1)  # 考虑时间维度的连接总数
+        num_connections = torch.sum(binary_adj_matrix) * Y.size(-1)  # Consider total connections in time dimension
         mean_violation = total_violations / num_connections if num_connections > 0 else torch.tensor(0.0).to(Y.device)
     else:
         raise ValueError("Y should be either 2D or 3D")
@@ -161,94 +160,94 @@ def calculate_physical_constraints_loss(Y, adj_matrix, threshold=0.0001):
     return mean_violation
     
 
-#计算常规的损失（考虑检测站点的损失以及非监测站点的损失
+# Calculate the conventional loss (considering the loss of detection sites and non-monitored sites
 def custom_loss_extend(Y, T, mask_measure,mask_prediction):
     
     Y=Y.cuda()
     T=T.cuda()
-    mask_measure = torch.tensor(mask_measure, dtype=torch.bool).cuda()  # 使用bool类型更合适
-    mask_prediction = torch.tensor(mask_prediction, dtype=torch.bool).cuda()  # 使用bool类型更合适
-    # 获取有监测数据的节点索引
+    mask_measure = torch.tensor(mask_measure, dtype=torch.bool).cuda()  # Using bool type is more appropriate
+    mask_prediction = torch.tensor(mask_prediction, dtype=torch.bool).cuda()  # Using bool type is more appropriate
+    # Get indices of nodes with monitored data
     mask_measure_idx = torch.nonzero(mask_measure, as_tuple=True)[0]
-    # 获取无监测数据的节点索引
+    # Get indices of nodes without monitored data
     mask_no_measure_idx = torch.nonzero(~mask_measure, as_tuple=True)[0]
-    #我们在比较的时候不用比较没有节点需水量的点，这些点忽略不计(又要是有需水量的，又要是非传感器的)
+    # When comparing, we don't compare points without node water demand, these points are ignored (must have water demand and be non-sensors)
     mask_intersection = torch.logical_and(~mask_measure, mask_prediction)
     mask_no_measure_idx=torch.nonzero(mask_intersection, as_tuple=True)[0]
     
 
-    # 计算基本损失（MAE） - 只考虑有监测数据的节点(有数据的部分取平均)
+    # Calculate basic loss (MAE) - only consider nodes with monitored data (average the parts with data)
     mae_loss_1 = torch.mean(torch.abs(Y[:, mask_measure_idx] - T[:, mask_measure_idx]))
-    # 计算额外损失，用算法估计未监测点的值，然后用它作为参考来更新 - 只考虑有监测数据的节点(有数据的部分取平均)
+    # Calculate additional loss, use algorithm to estimate the value of unmonitored points, then use it as reference to update - only consider nodes with monitored data (average the parts with data)
     mae_loss_2 = torch.mean(torch.abs(Y[:, mask_no_measure_idx] - T[:, mask_no_measure_idx]))
         
-    # 计算总损失
+    # Calculate total loss
     total_loss = 0.6*mae_loss_1 + 0.4*mae_loss_2
     #total_loss = mae_loss 
     return total_loss
 
 
-#计算常规的损失（考虑检测站点的损失以及物理约束
+# Calculate the conventional loss (considering the loss of detection sites and physical constraints)
 def custom_loss_extend_physic1(Y, T, A,mask_measure,mask_prediction):
     
     Y=Y.cuda()
     T=T.cuda()
     A=A.cuda()
-    mask_measure = torch.tensor(mask_measure, dtype=torch.bool).cuda()  # 使用bool类型更合适
-    mask_prediction = torch.tensor(mask_prediction, dtype=torch.bool).cuda()  # 使用bool类型更合适
-    # 获取有监测数据的节点索引
+    mask_measure = torch.tensor(mask_measure, dtype=torch.bool).cuda()  # Using bool type is more appropriate
+    mask_prediction = torch.tensor(mask_prediction, dtype=torch.bool).cuda()  # Using bool type is more appropriate
+    # Get indices of nodes with monitored data
     mask_measure_idx = torch.nonzero(mask_measure, as_tuple=True)[0]
-    # 获取无监测数据的节点索引
+    # Get indices of nodes without monitored data
     mask_no_measure_idx = torch.nonzero(~mask_measure, as_tuple=True)[0]
-    #我们在比较的时候不用比较没有节点需水量的点，这些点忽略不计(又要是有需水量的，又要是非传感器的)
+    # When comparing, we don't compare points without node water demand, these points are ignored (must have water demand and be non-sensors)
     mask_intersection = torch.logical_and(~mask_measure, mask_prediction)
     mask_no_measure_idx=torch.nonzero(mask_intersection, as_tuple=True)[0]
     
 
-    # 计算基本损失（MAE） - 只考虑有监测数据的节点(有数据的部分取平均)
+    # Calculate basic loss (MAE) - only consider nodes with monitored data (average the parts with data)
     mae_loss_1 = torch.mean(torch.abs(Y[:, mask_measure_idx] - T[:, mask_measure_idx]))
-    #计算物理约束的损失
+    # Calculate the loss of physical constraints
     mae_loss_2 =calculate_physical_constraints_loss(Y, A)
-    # 计算总损失
+    # Calculate total loss
     total_loss = mae_loss_1 +mae_loss_2
     #total_loss = mae_loss 
     return total_loss
 
-#计算常规的损失（考虑检测站点的损失以及非监测站点的损失以及物理约束(这个是最终论文设置的情况)
+# Calculate the conventional loss (considering the loss of detection sites, non-monitored sites, and physical constraints (this is the final paper setting))
 def custom_loss_extend_physic(Y, T, A,mask_measure,mask_prediction,loss_type=0,threshold=0.0001,w=1):
     
     Y=Y.cuda()
     T=T.cuda()
     A=A.cuda()
-    mask_measure = torch.tensor(mask_measure, dtype=torch.bool).cuda()  # 使用bool类型更合适
-    mask_prediction = torch.tensor(mask_prediction, dtype=torch.bool).cuda()  # 使用bool类型更合适
-    # 获取有监测数据的节点索引
+    mask_measure = torch.tensor(mask_measure, dtype=torch.bool).cuda()  # Using bool type is more appropriate
+    mask_prediction = torch.tensor(mask_prediction, dtype=torch.bool).cuda()  # Using bool type is more appropriate
+    # Get indices of nodes with monitored data
     mask_measure_idx = torch.nonzero(mask_measure, as_tuple=True)[0]
-    # 获取无监测数据的节点索引
+    # Get indices of nodes without monitored data
     mask_no_measure_idx = torch.nonzero(~mask_measure, as_tuple=True)[0]
-    #我们在比较的时候不用比较没有节点需水量的点，这些点忽略不计(又要是有需水量的，又要是非传感器的)
+    # When comparing, we don't compare points without node water demand, these points are ignored (must have water demand and be non-sensors)
     mask_intersection = torch.logical_and(~mask_measure, mask_prediction)
     mask_no_measure_idx=torch.nonzero(mask_intersection, as_tuple=True)[0]
     
     if loss_type==0:
-        # 计算基本损失（MAE） - 只考虑有监测数据的节点(有数据的部分取平均)
+        # Calculate basic loss (MAE) - only consider nodes with monitored data (average the parts with data)
         total_loss = torch.mean(torch.abs(Y[:, mask_measure_idx] - T[:, mask_measure_idx]))
         
     elif loss_type==1:        
-        # 计算基本损失（MAE） - 只考虑有监测数据的节点(有数据的部分取平均)
+        # Calculate basic loss (MAE) - only consider nodes with monitored data (average the parts with data)
         mae_loss_1 = torch.mean(torch.abs(Y[:, mask_measure_idx] - T[:, mask_measure_idx]))
-        #计算物理约束的损失
+        # Calculate the loss of physical constraints
         mae_loss_2 =calculate_physical_constraints_loss(Y, A,threshold)
-        # 计算总损失
+        # Calculate total loss
         total_loss = mae_loss_1 +mae_loss_2*w        
     elif loss_type==2:        
-        # 计算基本损失（MAE） - 只考虑有监测数据的节点(有数据的部分取平均)
+        # Calculate basic loss (MAE) - only consider nodes with monitored data (average the parts with data)
         mae_loss_1 = torch.mean(torch.abs(Y[:, mask_measure_idx] - T[:, mask_measure_idx]))
-        # 计算额外损失，用算法估计未监测点的值，然后用它作为参考来更新 - 只考虑有监测数据的节点(有数据的部分取平均)
+        # Calculate additional loss, use algorithm to estimate the value of unmonitored points, then use it as reference to update - only consider nodes with monitored data (average the parts with data)
         mae_loss_2 = torch.mean(torch.abs(Y[:, mask_no_measure_idx] - T[:, mask_no_measure_idx]))     
         total_loss = 0.7*mae_loss_1 + 0.3*mae_loss_2
     else:
-        # 如果 loss_type 不在 [0, 1, 2] 中，抛出一个异常
+        # If loss_type is not in [0, 1, 2], raise an exception
         raise ValueError(f"Invalid loss_type: {loss_type}. Expected one of 0, 1, 2.")        
     return total_loss
 

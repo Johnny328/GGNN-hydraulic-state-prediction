@@ -25,9 +25,9 @@ parser.add_argument('--epochs', type=int, default=40, help='number of epochs to 
 parser.add_argument('--batch_size', type=int, default=32, help='batch size')
 parser.add_argument('--propag_steps', type=int, default=15, help='number of propagation steps')
 parser.add_argument('--hidden_size', type=int, default=128, help='number of hidden units')
-parser.add_argument('--standard_type',type=int,default=1,help='0:不归一化，1：全局归一化，2：分区归一化')
+parser.add_argument('--standard_type',type=int,default=1,help='0: no normalization, 1: global normalization, 2: regional normalization')
 parser.add_argument('--threshold',type=float,default=0.0001,help='physics threshold')
-parser.add_argument('--w',type=float,default=1,help='physics 权重')
+parser.add_argument('--w',type=float,default=1,help='physics weight')
 
 #parser.add_argument('--num_head', type=int, default=1, help='number of attention head')
 #parser.add_argument('--sensor_number', type=int, default=33, help='number of sensors')
@@ -38,15 +38,11 @@ parser.add_argument('--w',type=float,default=1,help='physics 权重')
 # parser.add_argument('--geo_adj_file', type=str, default='./data_generate/geo_adj_uni.npy', help='path to geographical adjacency matrix file')
 #parser.add_argument('--feature_size', type=int, default=24, help='2h,5min interval')
 args = parser.parse_args()
-print('掩膜:{},持续时间：{}h,输出时间：{}h，回合数：{}，损失类型：{}，标准化类型：{}，隐藏状态数：{}，批样本数：{}，传播步：{}'.format(
-  args.percent,args.duration,args.output_size,args.epochs,args.loss_type,args.standard_type,args.hidden_size,args.batch_size,args.propag_steps))
 # Load data
-#将原始的数据进行一个数据的转化(得到的是原始的水质数据：all_source)
-# Load data
-data = f'./{args.network_name}/data_generate/dataset_all_new1.npz'  # 使用 network_name 作为文件路径的一部分
+data = f'./{args.network_name}/data_generate/dataset_all_new1.npz'  
 all_source= np.load(data)['dataset']
-#设置一个n_frame直接是1,2,4,6,12
-#n_frame=int(args.duration*60/args.report_time+1)   #历史数据+预测步长数据    
+# Set n_frame directly to 1,2,4,6,12
+#n_frame=int(args.duration*60/args.report_time+1)     
 n_frame=args.duration+args.output_size   
 n_slot=all_source.shape[0]-n_frame+1
 tmp_seq=np.zeros((n_slot,n_frame,all_source.shape[1]))
@@ -55,13 +51,13 @@ for i in range(n_slot):
     end=sta+n_frame
     tmp_seq[i,:,:]=all_source[sta:end,:]   
     
-#下面这个是最初的也就是最后一份是测试集的情况         
+      
 all_source_1=all_source[n_frame-1:]
 train_len=int(all_source_1.shape[0]*0.8)
 train_input,test_input=tmp_seq[:train_len],tmp_seq[train_len:]
 
-#下面这个是将测试集分成5分，每一份都作为一次测试集的情况
-# 对于每个部分，将它作为测试集，其他部分作为训练集
+# The following is to split the test set into 5 parts, each part as a test set
+# For each part, use it as the test set, and the others as the training set
 n_samples = tmp_seq.shape[0]
 n_folds = 5
 fold_size = n_samples // n_folds
@@ -80,7 +76,7 @@ if args.network_name == 'L_town':
   mask_area=np.load(data)['mask_area']
   mask_area_tensor = torch.tensor(mask_area) 
 else:
-  mask_area_tensor =1#这个地方是瞎填的，也就是其他的管网不需要管他
+  mask_area_tensor =1
 
 node_adj = np.load(f'./{args.network_name}/data_generate/adj_matrices_link_weight_{args.weight_type}_{args.weight_direction}.npy', allow_pickle=True)
 geo_adj = np.load(f'./{args.network_name}/data_generate/adj_matrices_link_distance_{args.distance_type}_{args.distance_direction}.npy', allow_pickle=True)

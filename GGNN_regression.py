@@ -13,13 +13,16 @@ import numpy as np
 class AttentionModule(nn.Module):
     def __init__(self, hidden_size):
         super(AttentionModule, self).__init__()
-        # 注意力权重，每个节点一个权重
+        # Attention weights, one for each node
         self.attention_weights = nn.Linear(hidden_size, 1)
 
     def forward(self, hidden_states):
-        attention_scores = self.attention_weights(hidden_states).softmax(dim=1)  # 计算注意力分数，并进行softmax归一化
-        attended_states = attention_scores * hidden_states  # 将注意力分数应用到隐藏状态上
-        return attended_states.sum(dim=1)  # 对加权的隐藏状态进行求和，获得一个综合的隐藏状态表示
+        # Calculate attention scores and perform softmax normalization
+        attention_scores = self.attention_weights(hidden_states).softmax(dim=1)
+        # Apply attention scores to hidden states
+        attended_states = attention_scores * hidden_states
+        # Sum the weighted hidden states to obtain a comprehensive hidden state representation
+        return attended_states.sum(dim=1)
 
 
 class GRUCell(nn.Module):
@@ -85,7 +88,7 @@ class GGNNModel(nn.Module):
         '''
         attr_matrix of shape (batch,graph_size,attributes dimension)
         adj_matrix of shape(batch,graph_size,graph_size)
-        邻接矩阵只有0和1，也就是边的类型是这种
+        The adjacency matrix only has 0 and 1, meaning the edge types are like this
         '''
         # return attr_matrix.squeeze(-1)
         
@@ -93,7 +96,7 @@ class GGNNModel(nn.Module):
         #A_in=torch.from_numpy(adj_matrix)
         A_out=A_in.transpose(-1,-2)
         
-        # # 添加自连接
+        # # Add self-connections
         # A_in = A_in + torch.eye(A_in.size(1)).to(A_in.device)
         # A_out = A_out + torch.eye(A_out.size(1)).to(A_out.device)
         if len(A_in.shape)<3:
@@ -106,14 +109,14 @@ class GGNNModel(nn.Module):
         # hidden_state = self.layer_norm(hidden_state)  # Apply layer normalization
         
         for step in range(self.propag_steps):
-            # a_v = A_v[h_1 ...  h_|V|](sum聚合)
+            # a_v = A_v[h_1 ... h_|V|] (sum aggregation)
             a_in =torch.bmm(A_in,hidden_state)
             a_out=torch.bmm(A_out,hidden_state)            
             hidden_state=self.gru(torch.cat((a_in,a_out),-1),hidden_state)    
          
-        #做回归的时候就不用考虑最后的归一化问题了
+        # For regression, no need to consider the final normalization issue
         output=self.linear_o(hidden_state)
-        return output  
-     
-        
+        return output
+
+
 

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-生成水力模拟的数据 - 通用版本
+Generate hydraulic simulation data - universal version
 @author:
 """
 import os
@@ -18,6 +18,7 @@ def load_config(config_path):
         return json.load(f)
 
 def get_demand_junctions(wn):
+    # Get nodes with demand
     demand_junc = []
     for i in wn.junction_name_list:
         base_demand = wn.get_node(i).demand_timeseries_list[0].base_value
@@ -61,7 +62,7 @@ def set_pressure_bounds(wn, scenario_names):
 
         if i in ['n303', 'n336', 'R1', "R2"]:
             upper_bound = 100
-            mask_area[node] = 1  # 特殊区域
+            mask_area[node] = 1  # Special area
         elif elevation <= 16:
             upper_bound = 41.11
             mask_area[node] = 2  # Area B
@@ -81,28 +82,28 @@ def generate_data_for_network(network_config):
     sensor_names = network_config['sensor_names']
     sensor_sample = network_config['sensor_sample']
 
-    # 创建输出目录
+    # Create output directory
     output_dir = os.path.join(name, "data_generate")
     os.makedirs(output_dir, exist_ok=True)
 
     wn = wntr.network.WaterNetworkModel(inp_path)
 
-    # 获取有需求的节点
+    # Get nodes with demand
     demand_junc = get_demand_junctions(wn)
 
-    # 创建掩膜
+    # Create masks
     mask_measure, mask_prediction, mask_sample = create_masks(wn, sensor_names, demand_junc, sensor_sample)
 
-    #设置压力边界
+    # Set pressure bounds
     scenario_names = wn.node_name_list
     # pre_bounds_low, pre_bounds_up, mask_area = set_pressure_bounds(wn, scenario_names)
 
-    # 模拟参数
+    # Simulation parameters
     duration = 2
     days = 60
     report_time = 5
 
-    # 重新初始化wn
+    # Reinitialize wn
     wn = wntr.network.WaterNetworkModel(inp_path)
     wn.options.time.report_timestep = 60 * report_time
     wn.options.time.duration = days * 24 * 3600
@@ -115,7 +116,7 @@ def generate_data_for_network(network_config):
     sim1=sim.node['head'][scenario_names]
     all_source = np.around(sim1.values, 2)
 
-    # # 数据转换
+    # # Data transformation
     # n_frame = int(duration * 60 / report_time + 1)
     # n_slot = all_source.shape[0] - n_frame + 1
     # tmp_seq = np.zeros((n_slot, n_frame, all_source.shape[1]))
@@ -128,7 +129,7 @@ def generate_data_for_network(network_config):
     # seq_train1, seq_test1 = all_source_1[:train_len], all_source_1[train_len:]
     # print(f'{name} - train: {len(seq_train)}, train series: {len(seq_train1)}')
 
-    # 保存数据
+    # Save data
     np.savez_compressed(
         os.path.join(output_dir, "dataset_all_new1.npz"),
         mask_measure=mask_measure,
@@ -143,9 +144,9 @@ def main():
     for network in networks:
         try:
             generate_data_for_network(network)
-            print(f"完成网络: {network['name']} 的数据生成。")
+            print(f"Completed data generation for network: {network['name']}.")
         except Exception as e:
-            print(f"处理网络 {network['name']} 时出错: {e}")
+            print(f"Error processing network {network['name']}: {e}")
 
 if __name__ == "__main__":
     main()
