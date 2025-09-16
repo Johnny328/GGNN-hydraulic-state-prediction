@@ -15,7 +15,6 @@ This repository contains the code for the paper "Graph Neural Networks for Hydra
 
 - **Utilities and Metrics**:
   - [`metrics.py`](metrics.py): Evaluation metrics, including physical constraint calculations.
-  - [`errors.py`](errors.py): Error computation utilities.
   - [`network_config.json`](network_config.json): Configuration file for network settings (e.g., sensor locations).
 
 ## Installation
