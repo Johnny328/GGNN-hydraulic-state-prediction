@@ -1,0 +1,10 @@
+{
+    "networks": [
+        {
+            "name": "ASnet",
+            "inp_path": "./benchmark/ASnet_modified.inp",
+            "sensor_names": ["5","11","32","37","44","51"],
+            "sensor_sample": ["5","11","32","37","44"]
+        }
+    ]
+}
